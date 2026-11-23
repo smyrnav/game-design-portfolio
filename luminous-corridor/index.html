@@ -1,0 +1,929 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Luminous Corridor</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #030510; }
+  #hint {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%);
+    color: #5f77b8; font: 13px/1.5 system-ui, sans-serif; text-align: center;
+    user-select: none; pointer-events: none; opacity: .8; white-space: nowrap;
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="hint"></div>
+<script type="module">
+import * as THREE from 'three';
+
+const hintEl = document.getElementById('hint');
+const HINTS = {
+  explore: 'WASD / arrows to move &middot; R / F to rise and sink &middot; hold click + drag to look &middot; scroll to glide &middot; click an orb to inspect &middot; space to pause',
+  inspect: 'scroll to come closer &middot; right-click or Esc to step back',
+  paused: 'paused &middot; space to resume'
+};
+function setHint(k) { hintEl.innerHTML = HINTS[k]; }
+
+// ---------- renderer / scene / camera ----------
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x04061a);
+scene.fog = new THREE.FogExp2(0x060a24, 0.055);
+
+const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 200);
+camera.position.set(0, 4.5, 8);   // you arrive mid-air, floating at the entrance
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.1;
+document.body.appendChild(renderer.domElement);
+
+// ---------- lights ----------
+scene.add(new THREE.HemisphereLight(0x1a2a66, 0x02030c, 0.7));
+const backLight = new THREE.PointLight(0x2244cc, 30, 60, 1.8);
+backLight.position.set(0, 4, -40);
+scene.add(backLight);
+// you are an orb too: your own glow travels with you
+const playerLight = new THREE.PointLight(0xaabcff, 2.2, 9, 2.0);
+scene.add(playerLight);
+
+// ---------- corridor geometry ----------
+const FLOOR_W = 14, CORRIDOR_LEN = 140, CEIL_Y = 12;
+
+const floor = new THREE.Mesh(
+  new THREE.PlaneGeometry(FLOOR_W, CORRIDOR_LEN),
+  new THREE.MeshStandardMaterial({ color: 0x0a1030, roughness: 0.35, metalness: 0.65 })
+);
+floor.rotation.x = -Math.PI / 2;
+floor.position.z = -CORRIDOR_LEN / 2 + 10;
+scene.add(floor);
+
+// high arched ceiling: a barrel vault like a church nave, in the floor's
+// exact finish. Springs from the top of the drapes (y = CEIL_Y), apex +4.
+const VAULT_R = 8.125, VAULT_RISE = 4;
+const vaultTheta = 2 * Math.acos((VAULT_R - VAULT_RISE) / VAULT_R);
+const vaultGeo = new THREE.CylinderGeometry(
+  VAULT_R, VAULT_R, CORRIDOR_LEN, 64, 1, true,
+  Math.PI - vaultTheta / 2, vaultTheta);
+vaultGeo.rotateX(Math.PI / 2);
+const vault = new THREE.Mesh(vaultGeo, new THREE.MeshStandardMaterial({
+  color: 0x0a1030, roughness: 0.35, metalness: 0.65, side: THREE.BackSide
+}));
+vault.position.set(0, CEIL_Y - (VAULT_R - VAULT_RISE), -CORRIDOR_LEN / 2 + 10);
+scene.add(vault);
+
+// subtle velvet nap: soft mottled bloom and pits with a hint of vertical
+// grain — texture only, the drapes keep their exact color, shape and wave
+function velvetTex() {
+  const s = 256, c = document.createElement('canvas');
+  c.width = c.height = s;
+  const g = c.getContext('2d');
+  g.fillStyle = '#f0f0f0';
+  g.fillRect(0, 0, s, s);
+  const b = document.createElement('canvas');          // soft round stamp
+  b.width = b.height = 32;
+  const bg = b.getContext('2d');
+  const grad = bg.createRadialGradient(16, 16, 0, 16, 16, 16);
+  grad.addColorStop(0, 'rgba(140,140,140,1)');
+  grad.addColorStop(1, 'rgba(140,140,140,0)');
+  bg.fillStyle = grad;
+  bg.fillRect(0, 0, 32, 32);
+  const stamp = (x, y, w, h) => {                      // wrapped: the tile is seamless
+    for (const ox of [-s, 0, s]) for (const oy of [-s, 0, s])
+      g.drawImage(b, x + ox - w / 2, y + oy - h / 2, w, h);
+  };
+  g.globalCompositeOperation = 'multiply';             // darker pits
+  for (let i = 0; i < 900; i++) {
+    g.globalAlpha = 0.04 + Math.random() * 0.1;
+    const w = 4 + Math.random() * 12;
+    stamp(Math.random() * s, Math.random() * s, w, w * (1.5 + Math.random() * 2));
+  }
+  g.globalCompositeOperation = 'screen';               // lighter bloom
+  for (let i = 0; i < 700; i++) {
+    g.globalAlpha = 0.03 + Math.random() * 0.07;
+    const w = 5 + Math.random() * 14;
+    stamp(Math.random() * s, Math.random() * s, w, w * (1.5 + Math.random() * 2));
+  }
+  g.globalCompositeOperation = 'source-over';
+  g.globalAlpha = 1;
+  const img = g.getImageData(0, 0, s, s), d = img.data;   // fine grain
+  for (let i = 0; i < d.length; i += 4) {
+    const n = (Math.random() - 0.5) * 12;
+    d[i] += n; d[i + 1] += n; d[i + 2] += n;
+  }
+  g.putImageData(img, 0, 0);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(24, 2);
+  return t;
+}
+const drapeNap = velvetTex();
+const drapeMat = new THREE.MeshStandardMaterial({
+  color: 0x14235c, roughness: 0.85, metalness: 0.05, side: THREE.DoubleSide,
+  map: drapeNap, bumpMap: drapeNap, bumpScale: 0.01
+});
+function makeDrape(len) {
+  const g = new THREE.PlaneGeometry(len, CEIL_Y, 160, 1);
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i);
+    p.setZ(i, Math.sin(x * 1.7) * 0.35 + Math.sin(x * 4.3 + 1.2) * 0.15);
+  }
+  g.computeVertexNormals();
+  return new THREE.Mesh(g, drapeMat);
+}
+const drapeL = makeDrape(CORRIDOR_LEN);
+drapeL.rotation.y = Math.PI / 2;
+drapeL.position.set(-FLOOR_W / 2, CEIL_Y / 2, -CORRIDOR_LEN / 2 + 10);
+scene.add(drapeL);
+const drapeR = makeDrape(CORRIDOR_LEN);
+drapeR.rotation.y = -Math.PI / 2;
+drapeR.position.set(FLOOR_W / 2, CEIL_Y / 2, -CORRIDOR_LEN / 2 + 10);
+scene.add(drapeR);
+
+// ---------- glow textures ----------
+function glowTexture(inner, outer) {
+  const s = 128, c = document.createElement('canvas');
+  c.width = c.height = s;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(s/2, s/2, 0, s/2, s/2, s/2);
+  grad.addColorStop(0.0, inner);
+  grad.addColorStop(0.35, outer);
+  grad.addColorStop(1.0, 'rgba(0,0,0,0)');
+  g.fillStyle = grad;
+  g.fillRect(0, 0, s, s);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+function radialTex(stops) {
+  const s = 128, c = document.createElement('canvas');
+  c.width = c.height = s;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(s/2, s/2, 0, s/2, s/2, s/2);
+  for (const [pos, col] of stops) grad.addColorStop(pos, col);
+  g.fillStyle = grad;
+  g.fillRect(0, 0, s, s);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+// halo peaks just OUTSIDE the orb's silhouette: light visibly emanates from
+// the surface outward — no bright blob hidden behind the sphere
+const haloTex = radialTex([
+  [0.00, 'rgba(190,215,255,0.12)'],
+  [0.30, 'rgba(190,215,255,0.15)'],
+  [0.36, 'rgba(200,225,255,0.5)'],
+  [0.55, 'rgba(110,150,255,0.16)'],
+  [1.00, 'rgba(40,60,180,0)']
+]);
+const floorGlowTex = glowTexture('rgba(120,160,255,0.55)', 'rgba(60,90,220,0.18)');
+const haloGeo = new THREE.PlaneGeometry(1, 1);   // shared by all halo billboards
+
+// ---------- orbs: a single energy body + halo + light pooling on the floor;
+// they rest on the floor or float free — weight, not balloons ----------
+const orbs = [];
+const coolWhite = new THREE.Color(0xdfeaff);
+const nearTint  = new THREE.Color(0x7fb8ff);   // electric blue, NOT purple
+function addOrb(x, y, z, r, withLight, role, grp) {
+  const group = new THREE.Group();
+  group.position.set(x, y, z);
+
+  // one glowing body — an unlit energy sphere with its halo atmosphere.
+  // The edge BRIGHTENS so the silhouette melts into the halo: light emanates
+  // from inside out, no visible boundary, no casing
+  const mat = new THREE.MeshBasicMaterial({ color: coolWhite.clone(), fog: false });
+  mat.onBeforeCompile = (shader) => {
+    shader.vertexShader = shader.vertexShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vN;\nvarying vec3 vV;')
+      .replace('#include <project_vertex>', '#include <project_vertex>\nvN = normalize(normalMatrix * normal);\nvV = normalize(-mvPosition.xyz);');
+    shader.fragmentShader = shader.fragmentShader
+      .replace('#include <common>', '#include <common>\nvarying vec3 vN;\nvarying vec3 vV;')
+      .replace('#include <color_fragment>', `#include <color_fragment>
+        float facing = clamp(dot(normalize(vN), normalize(vV)), 0.0, 1.0);
+        diffuseColor.rgb *= (0.3 + 0.7 * pow(facing, 0.7));`);
+  };
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(r, 48, 48), mat);
+  group.add(mesh);
+
+  // halo: a camera-facing glow that MELTS OUT as it nears the floor —
+  // a hard sprite/floor intersection is what read as a crisp cut line
+  const halo = new THREE.Mesh(haloGeo, new THREE.ShaderMaterial({
+    uniforms: { uTex: { value: haloTex }, uOpacity: { value: 1 } },
+    vertexShader: /* glsl */`
+      varying vec2 vUv;
+      varying float vWorldY;
+      void main() {
+        vUv = uv;
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorldY = wp.y;
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }`,
+    fragmentShader: /* glsl */`
+      uniform sampler2D uTex;
+      uniform float uOpacity;
+      varying vec2 vUv;
+      varying float vWorldY;
+      void main() {
+        vec4 c = texture2D(uTex, vUv);
+        float floorFade = smoothstep(-0.15, 0.7, vWorldY);
+        gl_FragColor = vec4(c.rgb, c.a * uOpacity * floorFade);
+      }`,
+    blending: THREE.AdditiveBlending, depthWrite: false, transparent: true
+  }));
+  halo.scale.setScalar(r * 7);
+  group.add(halo);
+
+  // floor light: a soft radial decal lying FLAT on the floor — perspective
+  // stretches it toward the viewer like a real reflection; a camera-facing
+  // billboard stands upright and reads as a streak cutting into the floor
+  const pool = new THREE.Mesh(
+    new THREE.PlaneGeometry(r * 8, r * 8),
+    new THREE.MeshBasicMaterial({
+      map: floorGlowTex, blending: THREE.AdditiveBlending,
+      depthWrite: false, transparent: true, opacity: 0.55, fog: false
+    })
+  );
+  pool.rotation.x = -Math.PI / 2;
+  pool.position.y = -y + 0.06;
+  group.add(pool);
+
+  let light = null;
+  if (withLight) {
+    light = new THREE.PointLight(0x8fb0ff, 6, 14, 2.0);
+    group.add(light);
+  }
+
+  scene.add(group);
+  const orb = {
+    group, mat, halo, light, mesh, pool,
+    r, role, grp,
+    phase: Math.random() * Math.PI * 2,
+    speed: 0.15 + Math.random() * 0.4,
+    pulseAmp: 0.5 + Math.random(),                      // some PULSE, some steady
+    glitchy: Math.random() < 0.18,                      // some glitch
+    gt: Math.random() * 6, gdur: 0.1 + Math.random() * 0.3,
+    baseIntensity: 1.4 + Math.random() * 0.6,
+    // glow personality: shy orbs dim under attention, curious ones flare up
+    trait: role === 'curious' ? 'curious' : (Math.random() < 0.2 ? 'shy' : 'calm'),
+    vx: 0, vy: 0, vz: 0,
+    swdir: Math.random() < 0.5 ? 1 : -1,
+    // crowd state: a goal, a pace, a preferred altitude
+    gx: x, gy: y, gz: z,
+    goalT: Math.random() * 4,
+    mode: 'move', modeT: 0,
+    burst: 1,
+    bandY: role === 'ascender' ? CEIL_Y + 1.5 : 0.5 + Math.random() * 6.5,
+    dipT: 0,                                        // ascenders: moments of sinking
+    laneX: (Math.random() - 0.5) * (FLOOR_W - 3),   // personal lane: some hug the drapes
+    homeZ: z,                                       // own stretch of the hall
+    roostX: (Math.random() - 0.5) * 8.5,            // ascenders: own spot under the vault
+    roostZ: -10 - Math.random() * (CORRIDOR_LEN - 30),
+    bored: false, boredT: 0,                        // curious: attention span
+    slotA: Math.random() * Math.PI * 2,
+    slotR: 0.9 + Math.random() * 1.2,
+    interest: 0,
+    speedCap: role === 'rusher'   ? 1.3 + Math.random() * 0.5
+            : role === 'curious'  ? 1.2 + Math.random() * 0.3
+            : role === 'groupie'  ? 1.1
+            : role === 'ascender' ? 0.5 + Math.random() * 0.3
+            : 0.8 + Math.random() * 0.5,
+    // inner life
+    breathPh: Math.random() * 10,
+    excite: 0,
+    blink: 4 + Math.random() * 11
+  };
+  if (grp) grp.members.push(orb);
+  mesh.userData.orb = orb;
+  orbs.push(orb);
+  return orb;
+}
+
+// ---------- crowd: nobody is stationed, everyone has an agenda ----------
+let lightBudget = 8;
+const lit = () => lightBudget-- > 0;
+
+// lumpy spread: a few gathering spots along the hall, not an even grid
+const clusters = [];
+for (let i = 0; i < 6; i++) clusters.push({
+  x: (Math.random() - 0.5) * (FLOOR_W - 2.5),
+  z: -6 - Math.random() * (CORRIDOR_LEN - 28)
+});
+function clusterSpot() {
+  const c = clusters[Math.floor(Math.random() * clusters.length)];
+  return {
+    x: THREE.MathUtils.clamp(c.x + (Math.random() - 0.5) * 9, -FLOOR_W / 2 + 1.5, FLOOR_W / 2 - 1.5),
+    z: THREE.MathUtils.clamp(c.z + (Math.random() - 0.5) * 12, -CORRIDOR_LEN + 14, 6)
+  };
+}
+function spot() {
+  if (Math.random() < 0.62) return clusterSpot();
+  return { x: (Math.random() - 0.5) * (FLOOR_W - 3),
+           z: -4 - Math.random() * (CORRIDOR_LEN - 20) };
+}
+
+// travelling companionships: a shared destination, members hold formation
+const groups = [];
+function newGroup(anchor) {
+  const g = {
+    x: anchor.x, y: anchor.y, z: anchor.z,
+    tx: anchor.x, ty: anchor.y, tz: anchor.z,
+    speed: 0.35 + Math.random() * 0.45,
+    retarget: 6 + Math.random() * 10,
+    members: []
+  };
+  groups.push(g);
+  return g;
+}
+
+const randY = () => 0.4 + Math.random() * (CEIL_Y + 1.5);
+// stratified homes: 4 lateral lanes (both walls included) x 6 depth segments,
+// shuffled and dealt out one per orb — coverage is guaranteed, not emergent
+const homes = [];
+for (let i = 0; i < 6; i++) for (const lx of [-4.6, -1.6, 1.6, 4.6])
+  homes.push({ x: lx, z: -10 - i * (CORRIDOR_LEN - 26) / 5 });
+for (let i = homes.length - 1; i > 0; i--) {
+  const j = Math.floor(Math.random() * (i + 1));
+  [homes[i], homes[j]] = [homes[j], homes[i]];
+}
+const yBands = [[0.4, 1.6], [2, 6], [6.5, 11.5]];   // low / mid / high, dealt round-robin
+let hi = 0;
+for (const role of ['rusher','rusher','rusher','rusher','rusher',
+                    'ascender','ascender','ascender','ascender','ascender','ascender','ascender','ascender',
+                    'curious','curious','curious',
+                    'wanderer','wanderer','wanderer','wanderer','wanderer']) {
+  const home = homes[hi++];
+  const r = 0.25 + Math.random() * 0.75;
+  const band = yBands[hi % 3];
+  // ascenders mostly start high already; the rest cover low/mid/high evenly
+  const y = role === 'ascender'
+    ? (Math.random() < 0.7 ? CEIL_Y - 2 + Math.random() * 3 : 1 + Math.random() * 5)
+    : band[0] + Math.random() * (band[1] - band[0]);
+  const o = addOrb(home.x + (Math.random() - 0.5) * 2.5, y,
+                   home.z + (Math.random() - 0.5) * 6,
+                   r, lit() && Math.random() < 0.35, role, null);
+  o.laneX = home.x; o.homeZ = home.z;
+  if (role === 'wanderer' || role === 'curious') o.bandY = (band[0] + band[1]) / 2;
+}
+for (const size of [2, 2, 3]) {
+  const s = spot();
+  const g = newGroup({ x: s.x, y: 1.2 + Math.random() * 4.5, z: s.z });
+  for (let i = 0; i < size; i++) {
+    addOrb(g.x + (Math.random() - 0.5) * 2.5,
+           g.y + (Math.random() - 0.5) * 1.5,
+           g.z + (Math.random() - 0.5) * 2.5,
+           0.25 + Math.random() * 0.6, lit() && Math.random() < 0.3, 'groupie', g);
+  }
+}
+// the three greeters by the entrance stay
+const greeter = addOrb(-3.2, 0.85, -3.5, 0.85, true, 'wanderer', null);
+greeter.bandY = 0.9;
+addOrb(3.6, 0.7, -5.0, 0.7, false, 'curious', null);
+addOrb(2.2, 3.1, -9.0, 0.55, false, 'ascender', null);
+
+// the vault rounds the hall's cross-section: high up, x is limited by the arch
+const VAULT_CY = CEIL_Y - (VAULT_R - VAULT_RISE);
+function maxXAt(y, r) {
+  if (y <= CEIL_Y) return FLOOR_W / 2 - 1.2;
+  const dy = y + r - VAULT_CY;
+  if (dy >= VAULT_R - 0.3) return 0.3;
+  return Math.max(0.3, Math.min(FLOOR_W / 2 - 1.2, Math.sqrt(VAULT_R * VAULT_R - dy * dy) - 0.35));
+}
+
+// aimless ones: pick a spot, drift there, maybe settle a while, move on
+function wanderSteer(a, dt) {
+  const p = a.group.position;
+  a.goalT -= dt;
+  const dx = a.gx - p.x, dy = a.gy - p.y, dz = a.gz - p.z;
+  const dd = Math.hypot(dx, dy, dz) || 0.001;
+  if (dd < 1.2 || a.goalT <= 0) {
+    if (a.mode !== 'linger' && Math.random() < 0.3) {
+      a.mode = 'linger'; a.modeT = 2 + Math.random() * 5;
+    } else {
+      a.mode = 'move';
+      // roam your own lane and your own stretch of the hall — not the crowd's
+      a.gx = THREE.MathUtils.clamp(a.laneX + (Math.random() - 0.5) * 3.5,
+                                   -FLOOR_W / 2 + 1.3, FLOOR_W / 2 - 1.3);
+      a.gz = THREE.MathUtils.clamp(a.homeZ + (Math.random() - 0.5) * 16,
+                                   -CORRIDOR_LEN + 14, 6);
+      // mostly roam your band — sometimes take off and visit another altitude
+      a.gy = Math.random() < 0.28
+        ? 0.5 + Math.random() * (CEIL_Y - 0.5)
+        : Math.max(a.r + 0.05, a.bandY + (Math.random() - 0.5) * 2.5);
+      a.goalT = 10 + Math.random() * 14;
+    }
+  }
+  if (a.mode === 'linger') {
+    a.modeT -= dt;
+    if (a.bandY < 1.6) a.vy += ((a.r + 0.05) - p.y) * 0.4 * dt;   // sink down and rest
+  } else {
+    const k = 1 - Math.pow(0.1, dt);
+    a.vx += (dx / dd * a.speedCap - a.vx) * k;
+    a.vy += (dy / dd * a.speedCap - a.vy) * k;
+    a.vz += (dz / dd * a.speedCap - a.vz) * k;
+  }
+}
+
+// ---------- dust: living motes — drift, shimmer, and shy away from you ----------
+const dustCount = 900;
+const dustPos = new Float32Array(dustCount * 3);
+const dustBase = new Float32Array(dustCount * 3);
+const dustOff = new Float32Array(dustCount * 3);       // disturbance offsets
+const dustPhase = new Float32Array(dustCount);
+const dustSpeed = new Float32Array(dustCount);
+const dustCol = new Float32Array(dustCount * 3);
+for (let i = 0; i < dustCount; i++) {
+  const xr = Math.random() * 2 - 1;
+  const x = Math.sign(xr) * Math.pow(Math.abs(xr), 0.6) * (FLOOR_W / 2);  // denser toward the drapes
+  const y = Math.random() * (CEIL_Y + 3);
+  const z = 10 - Math.random() * CORRIDOR_LEN;
+  dustBase.set([x, y, z], i * 3);
+  dustPos.set([x, y, z], i * 3);
+  dustPhase[i] = Math.random() * Math.PI * 2;
+  dustSpeed[i] = 0.3 + Math.random() * 1.2;
+  const b = 0.5 + Math.random() * 0.5;
+  dustCol.set([b * 0.55, b * 0.7, b], i * 3);
+}
+const dustGeo = new THREE.BufferGeometry();
+dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
+dustGeo.setAttribute('color', new THREE.BufferAttribute(dustCol, 3));
+dustGeo.setAttribute('phase', new THREE.BufferAttribute(dustPhase, 1));
+dustGeo.setAttribute('speed', new THREE.BufferAttribute(dustSpeed, 1));
+const dustMat = new THREE.ShaderMaterial({
+  uniforms: { uTime: { value: 0 } },
+  vertexColors: true,
+  transparent: true,
+  depthWrite: false,
+  blending: THREE.AdditiveBlending,
+  vertexShader: /* glsl */`
+    attribute float phase;
+    attribute float speed;
+    varying vec3 vColor;
+    varying float vTw;
+    uniform float uTime;
+    void main() {
+      vColor = color;
+      float tw = 0.5 + 0.5 * sin(uTime * speed * 2.0 + phase * 3.0);
+      vTw = tw;
+      vec4 mv = modelViewMatrix * vec4(position, 1.0);
+      gl_PointSize = clamp((1.5 + 3.0 * tw) * (20.0 / -mv.z), 1.0, 16.0);
+      gl_Position = projectionMatrix * mv;
+    }`,
+  fragmentShader: /* glsl */`
+    varying vec3 vColor;
+    varying float vTw;
+    void main() {
+      float d = length(gl_PointCoord - 0.5);
+      float a = smoothstep(0.5, 0.0, d);
+      gl_FragColor = vec4(vColor * (0.5 + vTw), a * (0.15 + 0.55 * vTw));
+    }`
+});
+const dust = new THREE.Points(dustGeo, dustMat);
+scene.add(dust);
+
+// ---------- state machine: explore -> focusing -> inspect -> returning ----------
+const state = { mode: 'explore', focus: null, saved: null, target: null, t: 0, paused: false };
+setHint('explore');
+
+// ---------- input: free cursor; hold left button and drag to look ----------
+let yaw = 0, pitch = 0;
+let looking = false, dragged = false, lastX = 0, lastY = 0, downX = 0, downY = 0;
+renderer.domElement.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0) return;
+  looking = true; dragged = false;
+  lastX = downX = e.clientX; lastY = downY = e.clientY;
+});
+addEventListener('pointerup', () => looking = false);
+addEventListener('pointercancel', () => looking = false);
+addEventListener('pointermove', (e) => {
+  if (!looking) return;
+  if (Math.abs(e.clientX - downX) + Math.abs(e.clientY - downY) > 6) dragged = true;
+  if (state.mode === 'explore' || state.mode === 'returning') {
+    yaw   -= (e.clientX - lastX) * 0.004;                                   // full 360
+    pitch  = THREE.MathUtils.clamp(pitch + (e.clientY - lastY) * 0.003, -1.55, 1.55);
+  }
+  lastX = e.clientX; lastY = e.clientY;
+});
+const keys = {};
+addEventListener('keydown', (e) => {
+  keys[e.code] = true;
+  if ((state.mode === 'inspect' || state.mode === 'focusing') &&
+      ['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)) {
+    // movement key instantly hands control back, right where you stand
+    const f = new THREE.Vector3();
+    camera.getWorldDirection(f);
+    yaw = Math.atan2(-f.x, -f.z);
+    pitch = -Math.asin(THREE.MathUtils.clamp(f.y, -1, 1));
+    state.mode = 'explore';
+    setHint('explore');
+  }
+  if (e.code === 'Space') {
+    e.preventDefault();
+    state.paused = !state.paused;
+    setHint(state.paused ? 'paused' : (state.mode === 'inspect' ? 'inspect' : 'explore'));
+  }
+  if (e.code === 'Escape' && state.mode !== 'explore') exitInspect();
+});
+addEventListener('keyup', (e) => keys[e.code] = false);
+let scrollVel = 0, inspectDist = 0;
+addEventListener('wheel', (e) => {
+  if (state.mode === 'inspect') {
+    const o = state.focus;
+    inspectDist = THREE.MathUtils.clamp(inspectDist + e.deltaY * 0.004, o.r * 1.8 + 0.4, o.r * 8 + 1.5);
+  } else if (state.mode === 'explore') {
+    scrollVel -= e.deltaY * 0.002;
+  }
+});
+addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  if (state.mode === 'inspect') exitInspect();
+});
+
+const ray = new THREE.Raycaster();
+addEventListener('click', (e) => {
+  if (dragged) return;               // that was a look-drag, not a click
+  if (state.mode === 'explore') {
+    ray.setFromCamera(new THREE.Vector2(
+      (e.clientX / innerWidth) * 2 - 1, -(e.clientY / innerHeight) * 2 + 1), camera);
+    const hits = ray.intersectObjects(orbs.map(o => o.mesh));
+    if (hits.length) startInspect(hits[0].object.userData.orb);
+  }
+});
+
+function startInspect(orb) {
+  state.focus = orb;
+  state.saved = { pos: camera.position.clone(), yaw, pitch };
+  const dir = camera.position.clone().sub(orb.group.position).normalize();
+  inspectDist = Math.max(orb.r * 3.5, 1.1);
+  state.target = { look: orb.group.position.clone(),
+                   dir };
+  state.t = 0;
+  state.mode = 'focusing';
+  setHint('inspect');
+}
+function exitInspect() {
+  state.t = 0;
+  state.mode = 'returning';
+  setHint('explore');
+}
+
+// ---------- movement bounds: soft ends, you are never teleported ----------
+const Z_NEAR = 8, Z_FAR = -CORRIDOR_LEN + 24;
+const clock = new THREE.Clock();
+const camFwd = new THREE.Vector3(), tmpV = new THREE.Vector3();
+const camVel = new THREE.Vector3();          // POV has mass: velocity eases, never snaps
+let lastBob = 0;
+let sceneTime = 0;
+
+function animate() {
+  requestAnimationFrame(animate);
+  const dt = Math.min(clock.getDelta(), 0.05);
+  if (!state.paused) sceneTime += dt;
+  const t = sceneTime;
+  playerLight.position.copy(camera.position);
+
+  if (state.mode === 'explore' || state.mode === 'returning') {
+    let fwd = 0, strafe = 0, lift = 0;
+    if (keys['KeyW'] || keys['ArrowUp']) fwd += 2.2;
+    if (keys['KeyS'] || keys['ArrowDown']) fwd -= 2.2;
+    if (keys['KeyA'] || keys['ArrowLeft']) strafe -= 1.8;
+    if (keys['KeyD'] || keys['ArrowRight']) strafe += 1.8;
+    if (keys['KeyR']) lift += 1.8;
+    if (keys['KeyF']) lift -= 1.8;
+    fwd += scrollVel;
+    scrollVel *= 0.92;
+    const fx = -Math.sin(yaw), fz = -Math.cos(yaw);   // walk where you look
+    const rx =  Math.cos(yaw), rz = -Math.sin(yaw);
+    // floaty: acceleration eases in and out — you drift, you don't drive
+    const k = 1 - Math.pow(0.03, dt);
+    camVel.x += ((fx * fwd + rx * strafe) - camVel.x) * k;
+    camVel.y += (lift - camVel.y) * k;
+    camVel.z += ((fz * fwd + rz * strafe) - camVel.z) * k;
+    camera.position.x = THREE.MathUtils.clamp(
+      camera.position.x + camVel.x * dt, -FLOOR_W / 2 + 1.5, FLOOR_W / 2 - 1.5);
+    camera.position.y = THREE.MathUtils.clamp(camera.position.y + camVel.y * dt, 0.5, CEIL_Y + 2.5);
+    camera.position.z = THREE.MathUtils.clamp(camera.position.z + camVel.z * dt, Z_FAR, Z_NEAR);
+    camera.rotation.set(0, 0, 0);
+    camera.rotateY(yaw);
+    camera.rotateX(-pitch);
+    // weightless: a slow breath of bob, no tilting
+    const bob = Math.sin(t * 0.6) * 0.05;
+    camera.position.y += bob - lastBob; lastBob = bob;
+  }
+
+  if (state.mode === 'focusing' || state.mode === 'inspect') {
+    const o = state.focus;
+    const dir = camera.position.clone().sub(o.group.position).normalize();
+    const want = o.group.position.clone().add(dir.multiplyScalar(inspectDist));
+    camera.position.lerp(want, 1 - Math.pow(0.001, dt));
+    camera.lookAt(o.group.position);
+    if (state.mode === 'focusing' &&
+        camera.position.distanceTo(want) < 0.05) state.mode = 'inspect';
+  }
+
+  if (state.mode === 'returning') {
+    camera.position.lerp(state.saved.pos, 1 - Math.pow(0.001, dt));
+    yaw += (state.saved.yaw - yaw) * (1 - Math.pow(0.001, dt));
+    pitch += (state.saved.pitch - pitch) * (1 - Math.pow(0.001, dt));
+    if (camera.position.distanceTo(state.saved.pos) < 0.05) state.mode = 'explore';
+  }
+
+  // crowd behaviour: personal space (never merge), you push them aside (never
+  // walk through), and each orb runs its own agenda — rushers cross the hall
+  // in a hurry, ascenders press up against the vault and gather there,
+  // companions travel in pairs and trios, the curious come to look at you
+  if (!state.paused) {
+    // companionships drift toward a shared destination
+    for (const g of groups) {
+      g.retarget -= dt;
+      const gdx = g.tx - g.x, gdy = g.ty - g.y, gdz = g.tz - g.z;
+      const gdd = Math.hypot(gdx, gdy, gdz) || 0.001;
+      if (gdd < 1.5 || g.retarget <= 0) {
+        const s = spot();
+        g.tx = s.x; g.tz = s.z; g.ty = 1.2 + Math.random() * 5;
+        g.retarget = 12 + Math.random() * 16;
+      } else {
+        const step = Math.min(g.speed * dt, gdd);
+        g.x += gdx / gdd * step; g.y += gdy / gdd * step; g.z += gdz / gdd * step;
+      }
+    }
+    const camSpeed = camVel.length();
+
+    for (let i = 0; i < orbs.length; i++) {
+      const a = orbs[i], p = a.group.position;
+      for (let j = i + 1; j < orbs.length; j++) {
+        const b = orbs[j], q = b.group.position;
+        const dx = p.x - q.x, dy = p.y - q.y, dz = p.z - q.z;
+        const dd = Math.sqrt(dx * dx + dy * dy + dz * dz) || 0.001;
+        const kin = a.grp && a.grp === b.grp;      // companions fly close
+        const minD = (a.r + b.r) * (kin ? 1.15 : 2.2);
+        if (dd < minD) {
+          const f = (minD - dd) / minD * (kin ? 3 : 6) * dt;
+          a.vx += dx / dd * f; a.vy += dy / dd * f; a.vz += dz / dd * f;
+          b.vx -= dx / dd * f; b.vy -= dy / dd * f; b.vz -= dz / dd * f;
+        }
+      }
+      const cdx = p.x - camera.position.x, cdy = p.y - camera.position.y, cdz = p.z - camera.position.z;
+      const cd = Math.sqrt(cdx * cdx + cdy * cdy + cdz * cdz) || 0.001;
+      // approach reaction: nearby orbs SWIRL around you like electrons,
+      // each on its own orbit direction, instead of just backing off
+      if (cd < 3.5) {
+        const w = 1 - cd / 3.5;
+        const sw = w * 2.2 * dt * a.swdir;
+        a.vx += (-cdz / cd) * sw;
+        a.vz += (cdx / cd) * sw;
+        const f = w * 1.5 * dt;
+        a.vx += cdx / cd * f; a.vz += cdz / cd * f;
+      }
+      // hard collision: the camera can never enter an orb
+      const minCd = a.r + 0.55;
+      if (cd < minCd) {
+        camera.position.x -= cdx / cd * (minCd - cd);
+        camera.position.z -= cdz / cd * (minCd - cd);
+        camera.position.y = THREE.MathUtils.clamp(
+          camera.position.y - cdy / cd * (minCd - cd), 0.5, CEIL_Y + 2.5);
+      }
+
+      // nobody is perfectly still: a soft bob and the occasional impulse
+      a.vy += Math.sin(t * a.speed + a.phase) * 0.12 * dt;
+      if (Math.random() < dt * 0.25) {
+        a.vx += (Math.random() - 0.5) * 0.4;
+        a.vy += (Math.random() - 0.5) * 0.2;
+        a.vz += (Math.random() - 0.5) * 0.4;
+      }
+
+      if (a.role === 'rusher') {
+        // hurries somewhere far, catches its breath, hurries on
+        a.goalT -= dt;
+        if (a.mode === 'pause') {
+          a.modeT -= dt;
+          if (a.modeT <= 0) { a.mode = 'move'; a.burst = 0.75 + Math.random() * 0.5; }
+        } else {
+          const dx = a.gx - p.x, dy = a.gy - p.y, dz = a.gz - p.z;
+          const dd = Math.hypot(dx, dy, dz) || 0.001;
+          if (dd < 2.5 || a.goalT <= 0) {
+            if (dd < 2.5) { a.mode = 'pause'; a.modeT = 0.8 + Math.random() * 3.2; }
+            a.gz = p.z < -CORRIDOR_LEN / 2 ? -4 - Math.random() * 8
+                                           : -CORRIDOR_LEN + 14 + Math.random() * 12;
+            // keeps its own lane: some rush along the walls, not the centerline
+            a.gx = THREE.MathUtils.clamp(a.laneX + (Math.random() - 0.5) * 3,
+                                         -FLOOR_W / 2 + 1.3, FLOOR_W / 2 - 1.3);
+            a.gy = 0.7 + Math.random() * 7.5;
+            a.goalT = 25 + Math.random() * 20;
+          } else {
+            if (Math.random() < dt * 0.06) a.goalT = 0;   // sudden change of mind
+            const sp = a.speedCap * a.burst;
+            const k = 1 - Math.pow(0.05, dt);
+            a.vx += (dx / dd * sp - a.vx) * k;
+            a.vy += (dy / dd * sp - a.vy) * k;
+            a.vz += (dz / dd * sp - a.vz) * k;
+          }
+        }
+      } else if (a.role === 'ascender') {
+        // always reaching for the roof; once there, keeps its own roost along
+        // the vault — they speckle the whole ceiling instead of one huddle.
+        // now and then one loses heart and sinks a few meters before climbing
+        a.dipT -= dt;
+        if (a.dipT <= 0 && Math.random() < dt * 0.02) a.dipT = 2 + Math.random() * 4;
+        const targetY = CEIL_Y + 1.0 + (a.phase % 1.6) - (a.dipT > 0 ? 3 + (a.phase % 3) : 0);
+        a.vy += (targetY - p.y) * (p.y < CEIL_Y - 1 || a.dipT > 0 ? 0.6 : 0.08) * dt;
+        if (p.y > CEIL_Y - 1.2) {
+          a.vx += (a.roostX - p.x) * 0.12 * dt;
+          a.vz += (a.roostZ - p.z) * 0.015 * dt + Math.sin(t * 0.07 + a.phase * 3) * 0.05 * dt;
+        } else {
+          a.vx += Math.sin(t * 0.11 + a.phase) * 0.06 * dt;
+          a.vz += Math.cos(t * 0.09 + a.phase * 2) * 0.06 * dt;
+        }
+      } else if (a.role === 'groupie') {
+        // hold formation around the travelling anchor, slots slowly rotate
+        const g = a.grp;
+        a.slotA += dt * 0.05 * a.swdir;
+        const sx = g.x + Math.cos(a.slotA) * a.slotR;
+        const sy = g.y + Math.sin(a.slotA * 0.7 + a.phase) * 0.5;
+        const sz = g.z + Math.sin(a.slotA) * a.slotR;
+        a.vx += (sx - p.x) * 0.8 * dt;
+        a.vy += (sy - p.y) * 0.8 * dt;
+        a.vz += (sz - p.z) * 0.8 * dt;
+      } else if (a.role === 'curious') {
+        // notices you, drifts over, keeps a polite distance at your eye level,
+        // then gets bored and drifts off — a sudden lunge startles it away
+        if (a.mode === 'startled') {
+          a.modeT -= dt;
+          if (a.modeT <= 0) a.mode = 'move';
+        } else if (camSpeed > 2.4 && cd < 3) {
+          a.mode = 'startled'; a.modeT = 0.7 + Math.random() * 0.6;
+          a.vx += cdx / cd * 2.2; a.vy += 0.6; a.vz += cdz / cd * 2.2;
+          a.interest = 0; a.bored = true;
+        } else if (a.bored) {
+          // needs you out of sight before it gets curious again
+          if (cd > 14) { a.bored = false; a.boredT = 0; }
+          wanderSteer(a, dt);
+        } else {
+          a.interest = THREE.MathUtils.clamp(a.interest + (cd < 11 ? 0.35 : -0.12) * dt, 0, 1);
+          if (a.interest > 0.25) {
+            const want = 2.3 + a.r * 1.5 + (a.phase % 1.5);   // each its own distance
+            const urge = THREE.MathUtils.clamp((cd - want) * 0.5, -0.5, 1) * a.speedCap * 0.6;
+            a.vx -= cdx / cd * urge * dt * 2;
+            a.vy += (-cdy / cd * urge + Math.sin(t * 0.5 + a.phase) * 0.1) * dt * 2;
+            a.vz -= cdz / cd * urge * dt * 2;
+            a.vx += (-cdz / cd) * 0.15 * a.swdir * dt;   // circling while watching
+            a.vz += (cdx / cd) * 0.15 * a.swdir * dt;
+            a.boredT += dt;
+            if (a.boredT > 7 + (a.phase % 6)) { a.bored = true; a.interest = 0; }
+          } else {
+            wanderSteer(a, dt);
+          }
+        }
+      } else {
+        wanderSteer(a, dt);
+      }
+
+      const damp = a.role === 'rusher' ? 0.975 : a.role === 'groupie' ? 0.92 : 0.94;
+      a.vx *= damp; a.vy *= damp; a.vz *= damp;
+      const spMax = a.mode === 'startled' ? 4
+                  : a.speedCap * (a.role === 'rusher' && a.mode !== 'pause' ? a.burst : 1)
+                    * (a.role === 'rusher' ? 1.2 : 1.5);
+      const spNow = Math.hypot(a.vx, a.vy, a.vz);
+      if (spNow > spMax) { a.vx *= spMax / spNow; a.vy *= spMax / spNow; a.vz *= spMax / spNow; }
+      p.x += a.vx * dt; p.y += a.vy * dt; p.z += a.vz * dt;
+      // soft walls: bounce back inside, the vault narrows the hall near the top
+      const mx = maxXAt(p.y, a.r);
+      if (p.x >  mx) { p.x =  mx; a.vx = -Math.abs(a.vx) * 0.4; }
+      if (p.x < -mx) { p.x = -mx; a.vx =  Math.abs(a.vx) * 0.4; }
+      if (p.y < a.r + 0.05) { p.y = a.r + 0.05; a.vy = Math.abs(a.vy) * 0.3; }
+      const topY = CEIL_Y + 3.4 - a.r;
+      if (p.y > topY) { p.y = topY; a.vy = -Math.abs(a.vy) * 0.2; }
+      if (p.z > 6.5) { p.z = 6.5; a.vz = -Math.abs(a.vz) * 0.4; }
+      if (p.z < -CORRIDOR_LEN + 13) { p.z = -CORRIDOR_LEN + 13; a.vz = Math.abs(a.vz) * 0.4; }
+    }
+  }
+
+  // orbs: breathing, blinking, awareness; proximity wakes them
+  for (const o of orbs) {
+    // its light reflects on the floor below as a streak reaching TOWARD the
+    // viewer (how glossy floors mirror a light), wider & fainter the higher
+    // the orb floats
+    const h = o.group.position.y;
+    o.pool.position.y = -h + 0.06;
+    const pdx = camera.position.x - o.group.position.x;
+    const pdz = camera.position.z - o.group.position.z;
+    o.pool.rotation.z = Math.atan2(-pdx, -pdz);
+    const spread = THREE.MathUtils.clamp(1 + h * 0.25, 1, 3);
+    o.pool.scale.set(spread, spread * 1.8, 1);
+    o.pool.material.opacity = 0.55 / (1 + h * 0.35);
+
+    const d = camera.position.distanceTo(o.group.position);
+    const near = THREE.MathUtils.clamp(1 - (d - o.r) / 6, 0, 1);
+
+    // awareness: arousal builds from closeness AND from being looked at,
+    // then lingers and fades slowly — like a memory of you
+    let seen = 0;
+    if (d < 10) {
+      camera.getWorldDirection(camFwd);
+      tmpV.copy(o.group.position).sub(camera.position).normalize();
+      seen = Math.max(tmpV.dot(camFwd), 0);
+    }
+    if (!state.paused) {
+      const gain = o.trait === 'curious' ? 1.0 : o.trait === 'shy' ? 0.7 : 0.5;
+      o.excite += near * (0.6 + 0.6 * seen) * gain * dt;
+      o.excite -= o.excite * 0.22 * dt;
+      o.excite = THREE.MathUtils.clamp(o.excite, 0, 1);
+      o.blink -= dt;
+      if (o.blink < -0.16) o.blink = 4 + Math.random() * 11;
+      o.breathPh += dt * (0.22 + o.excite * 0.55);   // breathes faster when excited
+    }
+    let blinkK = 1;
+    if (o.blink < 0) blinkK = 0.2 + 0.8 * Math.abs(o.blink + 0.08) / 0.08;
+
+    // glitch bursts: hard flicker + micro position jitter for a moment
+    let glitchK = 1;
+    if (o.glitchy && !state.paused) {
+      o.gt -= dt;
+      if (o.gt < -o.gdur) o.gt = 2 + Math.random() * 6;
+      if (o.gt < 0) {
+        glitchK = Math.random() < 0.5 ? 0.25 : 1.6;
+        o.group.position.x += (Math.random() - 0.5) * 0.02;
+        o.group.position.y += (Math.random() - 0.5) * 0.02;
+      }
+    }
+
+    const breath = Math.sin(o.breathPh * Math.PI * 2) * o.pulseAmp;
+    const beat = Math.pow(Math.max(Math.sin(o.breathPh * Math.PI * 4 + 1.3), 0), 3);
+    o.group.scale.setScalar(1 + 0.035 * breath + 0.02 * o.excite);
+    const pulse = (0.8 + 0.12 * breath + 0.5 * o.excite * beat) * blinkK * glitchK;
+    const intensity = o.baseIntensity * pulse * (1 + near * 2.2);
+    const tint = Math.min(near * 0.85 + o.excite * 0.25, 1);
+    // personality in the glow itself: shy orbs dim (playing dead) under
+    // attention, curious ones flare up
+    const shyDim = o.trait === 'shy' ? 1 - 0.4 * o.excite : 1;
+    const curBoost = o.trait === 'curious' ? 1 + 0.3 * o.excite : 1;
+    const glowK = Math.min(intensity, 2.2) * shyDim * curBoost * 0.55;
+    o.mat.color.copy(coolWhite).lerp(nearTint, tint).multiplyScalar(glowK);
+    o.halo.quaternion.copy(camera.quaternion);
+    o.halo.material.uniforms.uOpacity.value = (0.45 + near * 0.4) * shyDim * glitchK;
+    o.halo.scale.setScalar(o.r * 6 * (1 + near * 0.6) * (1 + 0.04 * breath));
+    if (o.light) {
+      o.light.intensity = 3.5 * pulse * (1 + near * 2.5) * shyDim * curBoost;
+      o.light.color.copy(coolWhite).lerp(nearTint, tint);
+    }
+  }
+
+  // excitement is contagious: it ripples to close neighbours
+  if (!state.paused) {
+    for (const a of orbs) {
+      for (const b of orbs) {
+        if (a === b) continue;
+        const dd = a.group.position.distanceTo(b.group.position);
+        if (dd < 3.5 && b.excite > a.excite)
+          a.excite += (b.excite - a.excite) * 0.4 * dt;
+      }
+    }
+  }
+
+  // dust motes: wander on their own phase, and swirl away when you pass through
+  dustMat.uniforms.uTime.value = t;
+  {
+    const p = dustGeo.attributes.position.array;
+    const cx = camera.position.x, cy = camera.position.y, cz = camera.position.z;
+    for (let i = 0; i < dustCount; i++) {
+      const j = i * 3, ph = dustPhase[i], sp = dustSpeed[i];
+      const x = dustBase[j]     + Math.sin(t * sp + ph) * 0.35;
+      const y = dustBase[j + 1] + Math.sin(t * sp * 0.7 + ph * 2.1) * 0.3;
+      const z = dustBase[j + 2] + Math.cos(t * sp * 0.85 + ph * 1.3) * 0.35;
+      if (!state.paused) {
+        const dx = x + dustOff[j] - cx, dy = y + dustOff[j + 1] - cy, dz = z + dustOff[j + 2] - cz;
+        const dd = Math.sqrt(dx * dx + dy * dy + dz * dz);
+        if (dd < 1.8 && dd > 0.001) {
+          const f = (1.8 - dd) / 1.8 * dt * 3.0;
+          dustOff[j] += dx / dd * f; dustOff[j + 1] += dy / dd * f; dustOff[j + 2] += dz / dd * f;
+        }
+        dustOff[j] *= 0.97; dustOff[j + 1] *= 0.97; dustOff[j + 2] *= 0.97;
+      }
+      p[j] = x + dustOff[j]; p[j + 1] = y + dustOff[j + 1]; p[j + 2] = z + dustOff[j + 2];
+    }
+    dustGeo.attributes.position.needsUpdate = true;
+  }
+  renderer.render(scene, camera);
+}
+animate();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
