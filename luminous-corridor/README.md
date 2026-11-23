@@ -18,13 +18,24 @@ tool (Kimi Code CLI) executing the implementation:
    ascending, travelling in pairs, curiosity toward the visitor), spatial
    distribution (walls, ceiling, depth — never a central cluster), pacing,
    and the drape material.
-2. **Reference & review** — drape look was directed from collected reference
-   photography of velvet stage curtains and blue-lit fabric installations;
-   every iteration was verified against rendered previews before acceptance,
-   and rejected directions were reverted.
+2. **Reference & review** — drape look and mood were directed from collected
+   reference photography of velvet stage curtains and blue-lit fabric
+   installations (see the gallery below); every iteration was verified
+   against rendered previews before acceptance, and rejected directions were
+   reverted.
 3. **Implementation** — a hand-written Three.js scene (single `index.html`,
    no engine): custom shaders for the orb glow and halos, a behaviour system
    for the crowd, procedural velvet texture, physically based materials.
+
+### Art direction references
+
+| | |
+|---|---|
+| ![Blue fabric corridor](reference-blue-corridor.jpg) | **`reference-blue-corridor.jpg`** — the core mood: a corridor walled off from the outside by fabric, everything bathed in blue. |
+| ![Velvet installation](reference-velvet-installation.jpg) | **`reference-velvet-installation.jpg`** — heavy velvet as architecture: gathered headers, deep fold shadow, slight pooling at the hem. |
+| ![Velvet close-up](reference-velvet-closeup.jpg) | **`reference-velvet-closeup.jpg`** — the material target: nap sheen on fold crests, near-black valleys. |
+| ![Dark draped hall](reference-dark-hall.jpg) | **`reference-dark-hall.jpg`** — how dark the drapes may go while still reading as cloth. |
+| ![Light curtain](reference-light-curtain.jpg) | **`reference-light-curtain.jpg`** — reference for the orbs' glow behaviour against dark fabric. |
 
 What I controlled: concept, references, art direction, acceptance criteria,
 and iterative review. What is automated: shader and behaviour code,
@@ -73,4 +84,5 @@ drag to look, scroll to glide, click an orb to inspect it, space to pause.
 |---|---|
 | `index.html` | The whole scene (ES modules, Three.js from CDN) |
 | `screenshot.png` | In-scene capture |
+| `reference-*.jpg` | Art direction reference images (drapes, velvet, mood) |
 | `serve.py` | Local dev server with caching disabled |
