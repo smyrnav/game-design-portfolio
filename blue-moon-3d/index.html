@@ -36,6 +36,8 @@ camera.position.set(0, 0.4, 4.2);
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setSize(innerWidth, innerHeight);
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.0;
 document.body.appendChild(renderer.domElement);
 
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -75,17 +77,17 @@ const moon = new THREE.Mesh(
     metalness: 0.0,
     emissive: 0xffffff,
     emissiveMap: colorTex,
-    emissiveIntensity: 0.85
+    emissiveIntensity: 0.45
   })
 );
 moonGroup.add(moon);
 
 // key light rides WITH the moon: relief shading stays locked to the surface,
 // so the texture looks identical at any rotation angle
-const sun = new THREE.DirectionalLight(0xe8f0ff, 0.9);
+const sun = new THREE.DirectionalLight(0xe8f0ff, 1.15);
 sun.position.set(2.5, 1.2, 2.0);
 moonGroup.add(sun);
-scene.add(new THREE.HemisphereLight(0x6a7fd0, 0x05070f, 0.35));
+scene.add(new THREE.HemisphereLight(0x6a7fd0, 0x05070f, 0.25));
 
 // --- Glow halo: bright inner ring + wide outer bloom (like the reference)
 function makeGlowTexture(stops) {
