@@ -9,6 +9,34 @@ HTML file plus textures.
 *Art direction reference: `reference-blue-moon.jpg` — the scene's palette and
 glow are matched to this image.*
 
+## Process and authorship
+
+This asset was **not hand-drawn or hand-modelled**. It was produced with a
+data-driven pipeline under my art direction:
+
+1. **Reference & direction** — I selected the reference image
+   (`reference-blue-moon.jpg`) and directed the outcome through iterative
+   review: palette and glow matching, relief depth (especially inside the
+   dark maria), rotation behaviour, and consistency of the surface at every
+   angle and zoom level.
+2. **Source data** — real lunar photography (LROC, 8K) and laser altimetry
+   (LOLA) from NASA's public CGI Moon Kit, re-graded into the reference
+   palette by a custom Python/NumPy pipeline (`make_texture.py`) that
+   samples the reference image's own luminance→color mapping and applies it
+   to the real geography; elevation data drives displacement and normal
+   maps, fused with photographic micro-relief.
+3. **Rendering** — a hand-written Three.js scene (single `index.html`, no
+   engine): displaced sphere, custom lighting balance (self-luminous moon,
+   surface-locked accent light), sprite glow, procedural starfield.
+4. **Tooling** — the pipeline and scene code were developed with an
+   AI-assisted coding tool (Kimi Code CLI) executing my direction; every
+   iteration was verified against rendered previews and the reference
+   before acceptance.
+
+What I controlled: concept, reference, art direction, acceptance criteria,
+and iterative review. What is automated: image processing, map generation,
+and boilerplate code.
+
 ## Run it
 
 Any static file server works. With Python:
