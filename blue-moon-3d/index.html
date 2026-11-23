@@ -62,6 +62,7 @@ function loadTex(url, srgb) {
 const colorTex = loadTex('moon_eq.jpg?v=4', true);
 const normalTex = loadTex('moon_normal.png?v=4');
 const heightTex = loadTex('moon_height.png?v=4');
+const aoTex = loadTex('moon_ao.png?v=4');
 
 const moon = new THREE.Mesh(
   new THREE.SphereGeometry(1, 512, 512),
@@ -72,10 +73,12 @@ const moon = new THREE.Mesh(
     displacementMap: heightTex,
     displacementScale: 0.03,
     roughness: 1.0,
+    aoMap: aoTex,
+    aoMapIntensity: 1.0,
     metalness: 0.0,
     emissive: 0xffffff,
     emissiveMap: colorTex,
-    emissiveIntensity: 0.45
+    emissiveIntensity: 0.3
   })
 );
 moonGroup.add(moon);
@@ -85,7 +88,7 @@ moonGroup.add(moon);
 const sun = new THREE.DirectionalLight(0xe8f0ff, 1.15);
 sun.position.set(2.5, 1.2, 2.0);
 moonGroup.add(sun);
-scene.add(new THREE.HemisphereLight(0x6a7fd0, 0x05070f, 0.25));
+scene.add(new THREE.HemisphereLight(0x6a7fd0, 0x05070f, 0.5));
 
 // --- Glow halo: bright inner ring + wide outer bloom (like the reference)
 function makeGlowTexture(stops) {
