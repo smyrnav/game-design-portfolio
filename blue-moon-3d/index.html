@@ -25,6 +25,7 @@
 <div id="hint">drag to rotate &middot; scroll to zoom</div>
 <script type="module">
 import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x02040a);
@@ -39,27 +40,12 @@ renderer.toneMapping = THREE.ACESFilmicToneMapping;
 renderer.toneMappingExposure = 1.0;
 document.body.appendChild(renderer.domElement);
 
-// --- Interaction: dragging rotates the MOON, not the camera — the cosmos
-// stays fixed in space. Scroll dollies the camera (same 2.2..9 range).
-let camDist = 4.2;
-let dragging = false, px = 0, py = 0;
-let velY = 0, velX = 0;                    // drag inertia
-renderer.domElement.addEventListener('pointerdown', (e) => {
-  dragging = true; px = e.clientX; py = e.clientY;
-});
-addEventListener('pointerup', () => dragging = false);
-addEventListener('pointercancel', () => dragging = false);
-addEventListener('pointermove', (e) => {
-  if (!dragging) return;
-  velY = (e.clientX - px) * 0.005;
-  velX = (e.clientY - py) * 0.005;
-  moonGroup.rotation.y += velY;
-  moonGroup.rotation.x = THREE.MathUtils.clamp(moonGroup.rotation.x + velX, -0.8, 0.8);
-  px = e.clientX; py = e.clientY;
-});
-addEventListener('wheel', (e) => {
-  camDist = THREE.MathUtils.clamp(camDist + e.deltaY * 0.003, 2.2, 9);
-});
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.minDistance = 2.2;
+controls.maxDistance = 9;
+controls.enablePan = false;
 
 // --- The moon: lit material + relief (normal & displacement maps derived from
 // the photo), with a soft self-glow so the original luminous look survives
@@ -120,10 +106,10 @@ function makeGlowTexture(stops) {
 const innerGlow = new THREE.Sprite(new THREE.SpriteMaterial({
   map: makeGlowTexture([
     [0.00, 'rgba(120,160,255,0)'],
-    [0.78, 'rgba(120,160,255,0)'],
-    [0.85, 'rgba(185,210,255,0.6)'],
-    [0.92, 'rgba(100,140,255,0.2)'],
-    [1.00, 'rgba(40,60,180,0)']
+    [0.72, 'rgba(120,160,255,0)'],
+    [0.82, 'rgba(150,185,255,0.35)'],
+    [0.90, 'rgba(115,155,255,0.18)'],
+    [1.00, 'rgba(50,70,190,0)']
   ]),
   blending: THREE.AdditiveBlending,
   depthWrite: false,
@@ -134,10 +120,11 @@ moonGroup.add(innerGlow);
 const outerGlow = new THREE.Sprite(new THREE.SpriteMaterial({
   map: makeGlowTexture([
     [0.00, 'rgba(120,160,255,0)'],
-    [0.30, 'rgba(120,160,255,0.08)'],
-    [0.40, 'rgba(150,185,255,0.3)'],
-    [0.60, 'rgba(80,110,230,0.1)'],
-    [1.00, 'rgba(40,60,180,0)']
+    [0.32, 'rgba(115,155,255,0.04)'],
+    [0.42, 'rgba(135,170,255,0.14)'],
+    [0.60, 'rgba(100,130,245,0.08)'],
+    [0.80, 'rgba(85,95,220,0.035)'],
+    [1.00, 'rgba(60,60,190,0)']
   ]),
   blending: THREE.AdditiveBlending,
   depthWrite: false,
@@ -157,7 +144,8 @@ for (let i = 0; i < starCount; i++) {
   pos.set([v.x, v.y, v.z], i * 3);
   const b = 0.35 + Math.random() * 0.65;
   const tint = Math.random();
-  col.set([b * (0.8 + tint * 0.2), b * 0.9, b], i * 3);
+  if (tint > 0.85) col.set([b * 0.9, b * 0.72, b], i * 3);        // violet stars
+  else col.set([b * (0.8 + tint * 0.2), b * 0.9, b], i * 3);
   phase[i] = Math.random() * Math.PI * 2;
   speed[i] = 0.4 + Math.random() * 2.2;
 }
@@ -200,19 +188,41 @@ const starMat = new THREE.ShaderMaterial({
 const stars = new THREE.Points(starGeo, starMat);
 scene.add(stars);
 
+// --- nebula veils: huge, dim, slow-breathing color clouds for a mystical sky
+const nebulae = [];
+const nebDefs = [
+  { c: '90,80,200',  p: [-30, 12, -40], s: 60, o: 0.10 },   // violet
+  { c: '60,90,220',  p: [35, -8, -45],  s: 70, o: 0.08 },   // indigo
+  { c: '50,120,200', p: [10, 20, -55],  s: 50, o: 0.07 },   // azure
+  { c: '120,70,190', p: [-15, -18, -50], s: 45, o: 0.06 },  // magenta hint
+  { c: '70,100,230', p: [25, 15, 40],   s: 55, o: 0.06 },
+  { c: '90,80,200',  p: [-35, 5, 35],   s: 50, o: 0.05 }
+];
+for (const n of nebDefs) {
+  const spr = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: makeGlowTexture([
+      [0.00, `rgba(${n.c},${n.o})`],
+      [0.55, `rgba(${n.c},${n.o * 0.4})`],
+      [1.00, `rgba(${n.c},0)`]
+    ]),
+    blending: THREE.AdditiveBlending, depthWrite: false, transparent: true
+  }));
+  spr.position.set(...n.p);
+  spr.scale.setScalar(n.s);
+  scene.add(spr);
+  nebulae.push({ spr, ph: Math.random() * Math.PI * 2, sp: 0.04 + Math.random() * 0.08 });
+}
+
 // --- Animate: gentle float + slow self-rotation
 const clock = new THREE.Clock();
 function animate() {
   requestAnimationFrame(animate);
   const t = clock.getElapsedTime();
   moon.rotation.y = -Math.PI / 2 + t * 0.02;         // slow spin, near side first
-  if (!dragging) {                                    // drag inertia, decaying
-    moonGroup.rotation.y += velY;
-    moonGroup.rotation.x = THREE.MathUtils.clamp(moonGroup.rotation.x + velX, -0.8, 0.8);
-    velY *= 0.95; velX *= 0.95;
-  }
-  camera.position.z = camDist;
+  controls.update();
   starMat.uniforms.uTime.value = t;                   // starlight glimmer
+  for (const n of nebulae)                            // nebula veils breathe
+    n.spr.material.opacity = 0.7 + 0.3 * Math.sin(t * n.sp * Math.PI * 2 + n.ph);
   renderer.render(scene, camera);
 }
 animate();
