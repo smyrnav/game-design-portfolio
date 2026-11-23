@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Blue Moon — floating in space</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; background: #02040a; }
+  #hint {
+    position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%);
+    color: #7d92b8; font: 13px/1.4 system-ui, sans-serif;
+    user-select: none; pointer-events: none; opacity: .8;
+  }
+</style>
+<script type="importmap">
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
+    "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/"
+  }
+}
+</script>
+</head>
+<body>
+<div id="hint">drag to rotate &middot; scroll to zoom</div>
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x02040a);
+
+const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.1, 100);
+camera.position.set(0, 0.4, 4.2);
+
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setSize(innerWidth, innerHeight);
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+document.body.appendChild(renderer.domElement);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.06;
+controls.minDistance = 2.2;
+controls.maxDistance = 9;
+controls.enablePan = false;
+
+// --- The moon: lit material + relief (normal & displacement maps derived from
+// the photo), with a soft self-glow so the original luminous look survives
+const moonGroup = new THREE.Group();
+scene.add(moonGroup);
+
+const loader = new THREE.TextureLoader();
+function loadTex(url, srgb) {
+  const t = loader.load(url);
+  if (srgb) t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return t;
+}
+const colorTex = loadTex('moon_eq.jpg?v=4', true);
+const normalTex = loadTex('moon_normal.png?v=4');
+const heightTex = loadTex('moon_height.png?v=4');
+const roughTex = loadTex('moon_rough.png?v=4');
+
+const moon = new THREE.Mesh(
+  new THREE.SphereGeometry(1, 512, 512),
+  new THREE.MeshStandardMaterial({
+    map: colorTex,
+    normalMap: normalTex,
+    normalScale: new THREE.Vector2(1.6, 1.6),
+    displacementMap: heightTex,
+    displacementScale: 0.03,
+    roughnessMap: roughTex,
+    roughness: 1.0,
+    metalness: 0.0,
+    emissive: 0xffffff,
+    emissiveMap: colorTex,
+    emissiveIntensity: 0.85
+  })
+);
+moonGroup.add(moon);
+
+// key light rides WITH the moon: relief shading stays locked to the surface,
+// so the texture looks identical at any rotation angle
+const sun = new THREE.DirectionalLight(0xe8f0ff, 0.9);
+sun.position.set(2.5, 1.2, 2.0);
+moonGroup.add(sun);
+scene.add(new THREE.HemisphereLight(0x6a7fd0, 0x05070f, 0.35));
+
+// --- Glow halo: bright inner ring + wide outer bloom (like the reference)
+function makeGlowTexture(stops) {
+  const s = 256, c = document.createElement('canvas');
+  c.width = c.height = s;
+  const g = c.getContext('2d');
+  const grad = g.createRadialGradient(s/2, s/2, 0, s/2, s/2, s/2);
+  for (const [pos, col] of stops) grad.addColorStop(pos, col);
+  g.fillStyle = grad;
+  g.fillRect(0, 0, s, s);
+  const t = new THREE.CanvasTexture(c);
+  t.colorSpace = THREE.SRGBColorSpace;
+  return t;
+}
+const innerGlow = new THREE.Sprite(new THREE.SpriteMaterial({
+  map: makeGlowTexture([
+    [0.00, 'rgba(120,160,255,0)'],
+    [0.72, 'rgba(120,160,255,0)'],
+    [0.83, 'rgba(170,205,255,0.55)'],
+    [0.92, 'rgba(90,130,255,0.18)'],
+    [1.00, 'rgba(40,60,180,0)']
+  ]),
+  blending: THREE.AdditiveBlending,
+  depthWrite: false,
+  transparent: true
+}));
+innerGlow.scale.setScalar(2.4);
+moonGroup.add(innerGlow);
+const outerGlow = new THREE.Sprite(new THREE.SpriteMaterial({
+  map: makeGlowTexture([
+    [0.00, 'rgba(120,160,255,0.28)'],
+    [0.40, 'rgba(80,120,255,0.12)'],
+    [1.00, 'rgba(40,60,180,0)']
+  ]),
+  blending: THREE.AdditiveBlending,
+  depthWrite: false,
+  transparent: true
+}));
+outerGlow.scale.setScalar(5.2);
+moonGroup.add(outerGlow);
+
+// --- Starfield
+const starCount = 2200;
+const pos = new Float32Array(starCount * 3);
+const col = new Float32Array(starCount * 3);
+for (let i = 0; i < starCount; i++) {
+  const v = new THREE.Vector3().randomDirection().multiplyScalar(30 + Math.random() * 25);
+  pos.set([v.x, v.y, v.z], i * 3);
+  const b = 0.35 + Math.random() * 0.65;
+  const tint = Math.random();
+  col.set([b * (0.8 + tint * 0.2), b * 0.9, b], i * 3);
+}
+const starGeo = new THREE.BufferGeometry();
+starGeo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+starGeo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+const stars = new THREE.Points(starGeo, new THREE.PointsMaterial({
+  size: 0.09, vertexColors: true, sizeAttenuation: true,
+  transparent: true, opacity: 0.95, depthWrite: false
+}));
+scene.add(stars);
+
+// --- Animate: gentle float + slow self-rotation
+const clock = new THREE.Clock();
+function animate() {
+  requestAnimationFrame(animate);
+  const t = clock.getElapsedTime();
+  moon.rotation.y = -Math.PI / 2 + t * 0.02;         // slow spin, near side first
+  stars.rotation.y = t * 0.004;                          // parallax drift
+  controls.update();
+  renderer.render(scene, camera);
+}
+animate();
+
+addEventListener('resize', () => {
+  camera.aspect = innerWidth / innerHeight;
+  camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth, innerHeight);
+});
+</script>
+</body>
+</html>
