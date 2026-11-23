@@ -59,10 +59,11 @@ function loadTex(url, srgb) {
   t.anisotropy = renderer.capabilities.getMaxAnisotropy();
   return t;
 }
-const colorTex = loadTex('moon_eq.jpg?v=4', true);
-const normalTex = loadTex('moon_normal.png?v=4');
-const heightTex = loadTex('moon_height.png?v=4');
-const aoTex = loadTex('moon_ao.png?v=4');
+const colorTex = loadTex('moon_eq.jpg?v=5', true);
+const normalTex = loadTex('moon_normal.png?v=5');
+const heightTex = loadTex('moon_height.png?v=5');
+const aoTex = loadTex('moon_ao.png?v=5');
+const emisTex = loadTex('moon_emis.jpg?v=5', true);
 
 const moon = new THREE.Mesh(
   new THREE.SphereGeometry(1, 512, 512),
@@ -77,7 +78,7 @@ const moon = new THREE.Mesh(
     aoMapIntensity: 1.5,
     metalness: 0.0,
     emissive: 0xffffff,
-    emissiveMap: colorTex,
+    emissiveMap: emisTex,
     emissiveIntensity: 0.35
   })
 );
