@@ -37,6 +37,16 @@ What I controlled: concept, reference, art direction, acceptance criteria,
 and iterative review. What is automated: image processing, map generation,
 and boilerplate code.
 
+### Process gallery
+
+| | |
+|---|---|
+| ![First working version](process-v1-front.jpg) | **First working version** — the reference photo wrapped directly onto a sphere. Look matched the reference, but only one hemisphere of content existed. |
+| ![Seam artifact](process-v1-seam.jpg) | **Identified issue: seam** — early attempts to extend a single photo around the sphere produced a visible junction stripe. Motivated rebuilding the texture pipeline on real full-sphere data (NASA LROC). |
+| ![Art direction feedback](process-feedback-maria.jpg) | **Art direction pass** — marked region: the dark maria read as flat matte; relief (rilles, small craters) was then fused into the normal map specifically in dark regions, with a satin-sheen roughness map. |
+| ![Close-up 1](process-closeup-1.jpg) | **Close-up inspection** — zoom checks drove the move from 2K to 8K textures and higher mesh tessellation. |
+| ![Close-up 2](process-closeup-2.jpg) | **Close-up inspection** — surface grain and limb glow reviewed at high zoom. |
+
 ## Run it
 
 Any static file server works. With Python:
