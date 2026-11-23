@@ -62,7 +62,6 @@ function loadTex(url, srgb) {
 const colorTex = loadTex('moon_eq.jpg?v=4', true);
 const normalTex = loadTex('moon_normal.png?v=4');
 const heightTex = loadTex('moon_height.png?v=4');
-const roughTex = loadTex('moon_rough.png?v=4');
 
 const moon = new THREE.Mesh(
   new THREE.SphereGeometry(1, 512, 512),
@@ -72,7 +71,6 @@ const moon = new THREE.Mesh(
     normalScale: new THREE.Vector2(1.6, 1.6),
     displacementMap: heightTex,
     displacementScale: 0.03,
-    roughnessMap: roughTex,
     roughness: 1.0,
     metalness: 0.0,
     emissive: 0xffffff,
