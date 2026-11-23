@@ -74,11 +74,11 @@ const moon = new THREE.Mesh(
     displacementScale: 0.03,
     roughness: 1.0,
     aoMap: aoTex,
-    aoMapIntensity: 1.0,
+    aoMapIntensity: 1.5,
     metalness: 0.0,
     emissive: 0xffffff,
     emissiveMap: colorTex,
-    emissiveIntensity: 0.3
+    emissiveIntensity: 0.15
   })
 );
 moonGroup.add(moon);
@@ -88,7 +88,7 @@ moonGroup.add(moon);
 const sun = new THREE.DirectionalLight(0xe8f0ff, 1.15);
 sun.position.set(2.5, 1.2, 2.0);
 moonGroup.add(sun);
-scene.add(new THREE.HemisphereLight(0x6a7fd0, 0x05070f, 0.5));
+scene.add(new THREE.HemisphereLight(0x6a7fd0, 0x05070f, 0.3));
 
 // --- Glow halo: bright inner ring + wide outer bloom (like the reference)
 function makeGlowTexture(stops) {
